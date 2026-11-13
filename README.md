@@ -1,7 +1,19 @@
 # ADVAG
 
 # Setup
-TODO
+Terminal:
+   ```bash
+   docker compose build
+   docker compose run --rm --service-ports dev bash -c "cmake -B build && cmake --build build && ./build/app"
+   ```
+
+Once the terminal shows `Setting vertical sync not supported`, the app is running.
+
+Browser:
+   ```
+   http://localhost:6080/vnc.html
+   ```
+
 
 # Development
 ## First time
