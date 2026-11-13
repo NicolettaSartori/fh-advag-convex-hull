@@ -1,17 +1,27 @@
-# C++ + SFML in Docker
+# ADVAG
 
-## Start
+# Setup
+TODO
+
+# Development
+## First time
 ```bash
-docker compose build          # Image einmalig bauen
+docker compose build
 docker compose run --rm --service-ports dev
+
+cmake -B build
+cmake --build build && ./build/app
 ```
 
-Im Container:
-
+## Dev
 ```bash
-cmake -B build
-cmake --build build
-./build/app
+docker compose run --rm --service-ports dev
+cmake --build build && ./build/app
+```
+
+After every change (in the container):
+```bash
+cmake --build build && ./build/app
 ```
 
 ## Browser
