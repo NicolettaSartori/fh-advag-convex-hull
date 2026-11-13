@@ -1,0 +1,11 @@
+services:
+  dev:
+    build: .
+    image: cpp-sfml-dev
+    container_name: cpp-sfml-dev
+    ports:
+      - "6080:6080"          # Browser-Anzeige (noVNC)
+    volumes:
+      - ./src:/workspace     # dein Code liegt auf deinem Rechner im Ordner src/
+    stdin_open: true
+    tty: true
