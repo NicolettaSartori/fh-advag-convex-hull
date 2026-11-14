@@ -1,0 +1,7 @@
+# Wird nicht ins Docker-Image kopiert (betrifft nur das fertige Programm "app")
+.git
+.idea
+**/.DS_Store
+src/build
+src/cmake-build-*
+src/protocol

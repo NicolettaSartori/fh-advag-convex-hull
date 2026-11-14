@@ -1,32 +1,24 @@
 # ADVAG
 
-# Setup
-Terminal:
+# Start the compiled program
    ```bash
-   docker compose build
-   docker compose run --rm --service-ports dev bash -c "cmake -B build && cmake --build build && ./build/hull"
+   docker compose build app
    ```
 
-Once the terminal shows `Setting vertical sync not supported`, the app is running.
+Start the visualization:
+   ```bash
+   docker compose run --rm --service-ports app
+   ```
 
-Browser:
+Once the terminal shows `Setting vertical sync not supported`, the app is running. Open in the browser:
    ```
    http://localhost:6080/vnc.html
    ```
 
-## Run the existing build
-Once the program has been built (see above), you can start it again without compiling:
-
-Visualization:
-   ```bash
-   docker compose run --rm --service-ports dev ./build/hull
-   ```
-
 Benchmark (results in `src/protocol/<algorithm>.csv`):
    ```bash
-   docker compose run --rm dev ./build/hull --bench
+   docker compose run --rm app ./build/hull --bench
    ```
-
 
 # Development
 ## First time

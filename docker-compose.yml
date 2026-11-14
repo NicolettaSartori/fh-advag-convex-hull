@@ -1,6 +1,8 @@
 services:
   dev:
-    build: .
+    build:
+      context: .
+      target: dev
     image: cpp-sfml-dev
     container_name: cpp-sfml-dev
     ports:
@@ -9,3 +11,14 @@ services:
       - ./src:/workspace     # dein Code liegt auf deinem Rechner im Ordner src/
     stdin_open: true
     tty: true
+
+  # finished app
+  app:
+    build:
+      context: .
+      target: app
+    image: convex-hull-app
+    ports:
+      - "6080:6080"
+    volumes:
+      - ./src/protocol:/app/protocol   # Benchmark-Ergebnisse landen in src/protocol

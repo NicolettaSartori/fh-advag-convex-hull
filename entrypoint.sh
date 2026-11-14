@@ -10,7 +10,9 @@ websockify --web /usr/share/novnc 6080 localhost:5900 > /tmp/novnc.log 2>&1 &
 
 echo "-----------------------------------------------------------"
 echo " Bildschirm im Browser: http://localhost:6080/vnc.html"
-echo " Bauen & starten:       cmake -B build && cmake --build build && ./build/hull"
+if [ -z "$HULL_APP" ]; then
+    echo " Bauen & starten:       cmake -B build && cmake --build build && ./build/hull"
+fi
 echo "-----------------------------------------------------------"
 
 exec "$@"

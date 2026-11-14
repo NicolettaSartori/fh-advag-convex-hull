@@ -1,4 +1,8 @@
-FROM ubuntu:26.04
+# Drei Stufen:
+#   base  gemeinsame Grundlage: Compiler, SFML, virtueller Bildschirm + noVNC
+#   dev   Entwicklung: der Code wird von außen nach /workspace gemountet
+#   app   fertiges Programm: der Code wird ins Image kopiert und kompiliert
+FROM ubuntu:26.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     DISPLAY=:1 \
@@ -35,8 +39,18 @@ RUN git clone --depth 1 --branch ${SFML_VERSION} https://github.com/SFML/SFML.gi
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-WORKDIR /workspace
 EXPOSE 6080
-
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# ---- Entwicklung --------------------------------------------------------------
+FROM base AS dev
+WORKDIR /workspace
 CMD ["bash"]
+
+# ---- Fertiges Programm --------------------------------------------------------
+FROM base AS app
+ENV HULL_APP=1
+WORKDIR /app
+COPY src/ /app/
+RUN cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+CMD ["./build/hull"]
