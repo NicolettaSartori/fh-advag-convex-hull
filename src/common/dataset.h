@@ -25,10 +25,19 @@ std::vector<Point> loadPoints(const std::string& path);
 // n random points, evenly spread with a small margin inside the world square.
 std::vector<Point> randomPoints(std::size_t n, unsigned seed);
 
+// A benchmark input: either a csv file or randomly generated points.
 struct TestCase {
-    std::string name;  // e.g. "square_1k"
-    std::string path;  // full path to the csv file
+    std::string name;             // e.g. "square_1k" or "random_1k"
+    std::string path;             // full path to the csv file (empty for random data)
+    std::size_t randomCount = 0;  // number of random points (only if path is empty)
+    unsigned seed = 0;            // seed for the random points
 };
 
-// All benchmark files: {square, disk, circle} x {1k, 10k, 100k, 1m}.
+// Loads the file or generates the random points.
+std::vector<Point> loadTestCase(const TestCase& tc);
+
+// All benchmark inputs:
+//   files:  {square, disk, circle} x {1k, 10k, 100k, 1m}
+//   random: {1k, 10k, 100k, 1m}, generated in memory with a fixed seed,
+//           so every algorithm gets exactly the same points.
 std::vector<TestCase> benchmarkCases();

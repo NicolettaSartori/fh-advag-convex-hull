@@ -56,13 +56,24 @@ std::vector<Point> randomPoints(std::size_t n, unsigned seed) {
     return points;
 }
 
+std::vector<Point> loadTestCase(const TestCase& tc) {
+    return tc.path.empty() ? randomPoints(tc.randomCount, tc.seed) : loadPoints(tc.path);
+}
+
 std::vector<TestCase> benchmarkCases() {
+    const std::pair<const char*, std::size_t> sizes[] = {
+        {"1k", 1'000}, {"10k", 10'000}, {"100k", 100'000}, {"1m", 1'000'000}};
+
     std::vector<TestCase> cases;
     for (const char* dist : {"square", "disk", "circle"}) {
-        for (const char* size : {"1k", "10k", "100k", "1m"}) {
-            const std::string name = std::string(dist) + "_" + size;
+        for (const auto& [label, count] : sizes) {
+            const std::string name = std::string(dist) + "_" + label;
             cases.push_back({name, projectPath("data/" + name + ".csv")});
         }
+    }
+    for (const auto& [label, count] : sizes) {
+        constexpr unsigned SEED = 12345;
+        cases.push_back({std::string("random_") + label, "", count, SEED});
     }
     return cases;
 }

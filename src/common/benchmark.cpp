@@ -30,14 +30,14 @@ void runBenchmark(const HullAlgorithm& algo, int runs) {
 
     std::cout << algo.name << ": " << runs << " runs per test case\n\n";
     std::printf("%-12s %9s %9s %10s %10s %10s %10s\n", "dataset", "n", "hull", "median ms", "min ms",
-                "max ms", "load ms");
+                "max ms", "load ms");  // for random data: generation time
 
     for (const TestCase& tc : benchmarkCases()) {
         std::vector<Point> points;
         double loadMs = 0;
         try {
             const auto start = Clock::now();
-            points = loadPoints(tc.path);
+            points = loadTestCase(tc);
             loadMs = msSince(start);
         } catch (const std::exception& e) {
             std::printf("%-12s skipped: %s\n", tc.name.c_str(), e.what());
