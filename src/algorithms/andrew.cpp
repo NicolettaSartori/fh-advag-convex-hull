@@ -1,9 +1,9 @@
 // Andrew's Monotone Chain algorithm
 // Usage:
-//   ./build/andrew            interactive visualization
-//   ./build/andrew --bench    time measurements -> protocol/andrew.csv
+//   ./build/hull                  menu -> visualization
+//   ./build/hull --bench andrew   time measurements -> protocol/andrew.csv
 
-#include "hull_app.h"
+#include "algorithms.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -121,7 +121,7 @@ std::vector<Point> andrew(std::vector<Point> pts, Tracer& trace) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+HullAlgorithm makeAndrew() {
     HullAlgorithm algo;
     algo.id = "andrew";
     algo.name = "Andrew's Monotone Chain";
@@ -134,5 +134,5 @@ int main(int argc, char** argv) {
         andrew(std::move(pts), recorder);
         return std::move(recorder.steps);
     };
-    return runHullApp(algo, argc, argv);
+    return algo;
 }

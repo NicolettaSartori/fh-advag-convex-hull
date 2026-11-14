@@ -20,6 +20,7 @@ constexpr float PLOT = 720.f;  // the world square [0, WORLD_SIZE]^2 is drawn as
 constexpr float PANEL_X = 2 * MARGIN + PLOT;
 constexpr std::size_t RANDOM_POINTS = 10;
 const char* const FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+const char* const MENU_TITLE = "Convex Hull";
 const int SPEEDS[] = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000};  // steps per second
 constexpr int SPEED_COUNT = sizeof(SPEEDS) / sizeof(SPEEDS[0]);
 
@@ -27,6 +28,8 @@ namespace color {
 const sf::Color background(24, 26, 33);
 const sf::Color plot(32, 35, 44);
 const sf::Color border(70, 75, 90);
+const sf::Color button(45, 50, 64);
+const sf::Color buttonHover(60, 68, 86);
 const sf::Color point(150, 160, 180);
 const sf::Color hull(80, 200, 140);
 const sf::Color hullFill(80, 200, 140, 40);
@@ -36,6 +39,11 @@ const sf::Color rejected(240, 80, 80);
 const sf::Color text(220, 224, 232);
 const sf::Color dim(140, 146, 160);
 }  // namespace color
+
+// What to do after a screen is left.
+enum class Next { Menu, Quit };
+
+// ---- drawing helpers -------------------------------------------------------
 
 sf::Vector2f toScreen(const Point& p) {
     const float s = PLOT / static_cast<float>(WORLD_SIZE);
@@ -83,21 +91,71 @@ std::string wrap(const std::string& text, std::size_t width) {
     return result + line;
 }
 
-class Visualizer {
+// font == nullptr: the font could not be loaded, text is skipped.
+void drawText(sf::RenderWindow& window, const sf::Font* font, const std::string& str, sf::Vector2f pos,
+              unsigned size, sf::Color c, bool centered = false) {
+    if (!font) return;
+    sf::Text t(*font, str, size);
+    t.setFillColor(c);
+    if (centered) {
+        const sf::FloatRect bounds = t.getLocalBounds();
+        t.setOrigin(bounds.position + bounds.size / 2.f);
+    }
+    t.setPosition(pos);
+    window.draw(t);
+}
+
+sf::Vector2f mousePosition(const sf::RenderWindow& window) {
+    return window.mapPixelToCoords(sf::Mouse::getPosition(window));
+}
+
+bool isLeftClick(const sf::Event& event, const sf::RenderWindow& window, const sf::FloatRect& area) {
+    const auto* mouse = event.getIf<sf::Event::MouseButtonPressed>();
+    return mouse && mouse->button == sf::Mouse::Button::Left &&
+           area.contains(window.mapPixelToCoords(mouse->position));
+}
+
+bool isKey(const sf::Event& event, sf::Keyboard::Key code) {
+    const auto* key = event.getIf<sf::Event::KeyPressed>();
+    return key && key->code == code;
+}
+
+struct Button {
+    sf::FloatRect rect;
+    std::string label;
+    unsigned textSize = 20;
+
+    bool clicked(const sf::Event& event, const sf::RenderWindow& window) const {
+        return isLeftClick(event, window, rect);
+    }
+
+    void draw(sf::RenderWindow& window, const sf::Font* font) const {
+        const bool hover = rect.contains(mousePosition(window));
+        sf::RectangleShape box(rect.size);
+        box.setPosition(rect.position);
+        box.setFillColor(hover ? color::buttonHover : color::button);
+        box.setOutlineColor(hover ? color::hull : color::border);
+        box.setOutlineThickness(2.f);
+        window.draw(box);
+        drawText(window, font, label, rect.position + rect.size / 2.f, textSize, color::text, true);
+    }
+};
+
+// ---- visualization of one algorithm ---------------------------------------
+
+class AlgorithmView {
 public:
-    explicit Visualizer(const HullAlgorithm& algo)
-        : algo_(algo),
-          window_(sf::VideoMode({WINDOW_W, WINDOW_H}), algo.name, sf::Style::Titlebar | sf::Style::Close) {
-        window_.setFramerateLimit(60);
-        hasFont_ = font_.openFromFile(FONT_PATH);
-        if (!hasFont_) std::cerr << "Font not found (" << FONT_PATH << "), text is not shown.\n";
+    AlgorithmView(sf::RenderWindow& window, const sf::Font* font, const HullAlgorithm& algo)
+        : algo_(algo), window_(window), font_(font) {
+        window_.setTitle(algo.name);
         setPoints(randomPoints(RANDOM_POINTS, rng_()), "random");
     }
 
-    void run() {
+    Next run() {
         sf::Clock clock;
-        while (window_.isOpen()) {
-            while (const std::optional event = window_.pollEvent()) handle(*event);
+        while (true) {
+            while (const std::optional event = window_.pollEvent())
+                if (const std::optional next = handle(*event)) return *next;
             update(clock.restart().asSeconds());
             draw();
         }
@@ -157,13 +215,15 @@ private:
 
     // ---- input -----------------------------------------------------------
 
-    void handle(const sf::Event& event) {
-        if (event.is<sf::Event::Closed>()) {
-            window_.close();
-        } else if (const auto* key = event.getIf<sf::Event::KeyPressed>()) {
+    std::optional<Next> handle(const sf::Event& event) {
+        if (event.is<sf::Event::Closed>()) return Next::Quit;
+        if (back_.clicked(event, window_)) return Next::Menu;
+
+        if (const auto* key = event.getIf<sf::Event::KeyPressed>()) {
             using Key = sf::Keyboard::Key;
             switch (key->code) {
-                case Key::Escape: window_.close(); break;
+                case Key::Escape:
+                case Key::Backspace: return Next::Menu;
                 case Key::Right: playing_ = false; goTo(static_cast<long>(index_) + 1); break;
                 case Key::Left: playing_ = false; goTo(static_cast<long>(index_) - 1); break;
                 case Key::Home: goTo(0); break;
@@ -184,10 +244,12 @@ private:
             }
         } else if (const auto* mouse = event.getIf<sf::Event::MouseButtonPressed>()) {
             const sf::Vector2f pixel = window_.mapPixelToCoords(mouse->position);
-            if (!insidePlot(pixel)) return;
-            if (mouse->button == sf::Mouse::Button::Left) addPoint(pixel);
-            if (mouse->button == sf::Mouse::Button::Right) removePoint(pixel);
+            if (insidePlot(pixel)) {
+                if (mouse->button == sf::Mouse::Button::Left) addPoint(pixel);
+                if (mouse->button == sf::Mouse::Button::Right) removePoint(pixel);
+            }
         }
+        return std::nullopt;
     }
 
     void update(float seconds) {
@@ -253,11 +315,7 @@ private:
     }
 
     void text(const std::string& str, float x, float y, unsigned size, sf::Color c) {
-        if (!hasFont_) return;
-        sf::Text t(font_, str, size);
-        t.setPosition({x, y});
-        t.setFillColor(c);
-        window_.draw(t);
+        drawText(window_, font_, str, {x, y}, size, c);
     }
 
     void legend(float y, sf::Color c, const std::string& label) {
@@ -292,26 +350,29 @@ private:
         legend(308, color::current, "Current point");
         legend(332, color::rejected, "Point being removed");
 
-        text("Right / Left     next / previous step\n"
-             "Space            play / pause\n"
-             "Up / Down        faster / slower\n"
-             "Home / End       first / last step\n"
-             "Left click       add point\n"
-             "Right click      remove point\n"
-             "N                new random points\n"
-             "1 / 2 / 3        square / disk / circle 1k\n"
-             "C                clear all points\n"
-             "Esc              quit",
-             x, 380, 15, color::dim);
+        text("Right / Left\nSpace\nUp / Down\nHome / End\nLeft click\nRight click\nN\n1 / 2 / 3\nC\nEsc", x, 380, 15,
+             color::dim);
+        text("next / previous step\n"
+             "play / pause\n"
+             "faster / slower\n"
+             "first / last step\n"
+             "add point\n"
+             "remove point\n"
+             "new random points\n"
+             "square / disk / circle 1k\n"
+             "clear all points\n"
+             "back to the menu",
+             x + 120, 380, 15, color::dim);
 
-        if (!error_.empty()) text(wrap(error_, 46), x, 650, 15, color::rejected);
+        if (!error_.empty()) text(wrap(error_, 46), x, 600, 15, color::rejected);
+        back_.draw(window_, font_);
     }
 
     const HullAlgorithm& algo_;
-    sf::RenderWindow window_;
-    sf::Font font_;
-    bool hasFont_ = false;
+    sf::RenderWindow& window_;
+    const sf::Font* font_;
     std::mt19937 rng_{std::random_device{}()};
+    Button back_{{{PANEL_X, 690.f}, {200.f, 44.f}}, "< Algorithms"};
 
     std::vector<Point> points_;
     std::string source_;
@@ -325,8 +386,74 @@ private:
     float progress_ = 0;
 };
 
+// ---- placeholder for algorithms that are not implemented yet ---------------
+
+Next runTodo(sf::RenderWindow& window, const sf::Font* font, const HullAlgorithm& algo) {
+    window.setTitle(algo.name);
+    const Button back{{{(WINDOW_W - 200.f) / 2, 460.f}, {200.f, 44.f}}, "< Algorithms"};
+    const sf::Vector2f center(WINDOW_W / 2.f, 0.f);
+
+    while (true) {
+        while (const std::optional event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) return Next::Quit;
+            if (isKey(*event, sf::Keyboard::Key::Escape) || isKey(*event, sf::Keyboard::Key::Backspace) ||
+                back.clicked(*event, window))
+                return Next::Menu;
+        }
+        window.clear(color::background);
+        drawText(window, font, algo.name, center + sf::Vector2f(0, 200), 32, color::text, true);
+        drawText(window, font, "TODO", center + sf::Vector2f(0, 330), 64, color::tested, true);
+        back.draw(window, font);
+        window.display();
+    }
+}
+
 }  // namespace
 
-void runVisualizer(const HullAlgorithm& algo) {
-    Visualizer(algo).run();
+// ---- menu ------------------------------------------------------------------
+
+void runVisualizer(const std::vector<HullAlgorithm>& algos) {
+    sf::RenderWindow window(sf::VideoMode({WINDOW_W, WINDOW_H}), MENU_TITLE, sf::Style::Titlebar | sf::Style::Close);
+    window.setFramerateLimit(60);
+
+    sf::Font fontStorage;
+    const sf::Font* font = fontStorage.openFromFile(FONT_PATH) ? &fontStorage : nullptr;
+    if (!font) std::cerr << "Font not found (" << FONT_PATH << "), text is not shown.\n";
+
+    std::vector<Button> buttons;
+    for (std::size_t i = 0; i < algos.size(); ++i) {
+        const float y = 280.f + static_cast<float>(i) * 120.f;
+        buttons.push_back({{{(WINDOW_W - 420.f) / 2, y}, {420.f, 90.f}}, algos[i].name, 24});
+    }
+
+    const auto open = [&](const HullAlgorithm& algo) {
+        const Next next = algo.implemented() ? AlgorithmView(window, font, algo).run() : runTodo(window, font, algo);
+        window.setTitle(MENU_TITLE);
+        if (next == Next::Quit) window.close();
+    };
+
+    while (window.isOpen()) {
+        while (const std::optional event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>() || isKey(*event, sf::Keyboard::Key::Escape)) {
+                window.close();
+            } else if (const auto* key = event->getIf<sf::Event::KeyPressed>()) {
+                // Number keys 1..n open the n-th algorithm.
+                const int i = static_cast<int>(key->code) - static_cast<int>(sf::Keyboard::Key::Num1);
+                if (i >= 0 && i < static_cast<int>(algos.size())) open(algos[i]);
+            } else {
+                for (std::size_t i = 0; i < buttons.size(); ++i)
+                    if (buttons[i].clicked(*event, window)) open(algos[i]);
+            }
+        }
+        if (!window.isOpen()) break;
+
+        const sf::Vector2f center(WINDOW_W / 2.f, 0.f);
+        window.clear(color::background);
+        drawText(window, font, MENU_TITLE, center + sf::Vector2f(0, 150), 40, color::text, true);
+        drawText(window, font, "Choose an algorithm", center + sf::Vector2f(0, 210), 20, color::dim, true);
+        for (const Button& b : buttons) b.draw(window, font);
+        drawText(window, font, "Click or press 1-" + std::to_string(algos.size()) + "   |   Esc: quit",
+                 center + sf::Vector2f(0, WINDOW_H - 60.f), 16, color::dim, true);
+        window.display();
+    }
 }

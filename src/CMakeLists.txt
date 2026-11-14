@@ -9,10 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(SFML 3.1 COMPONENTS Graphics Window System Audio REQUIRED)
-
-add_executable(app main.cpp)
-target_link_libraries(app PRIVATE SFML::Graphics SFML::Audio)
+find_package(SFML 3.1 COMPONENTS Graphics Window System REQUIRED)
 
 # Shared code for all convex hull algorithms: data loading, visualization, benchmark.
 add_library(hull_common STATIC
@@ -25,6 +22,10 @@ target_include_directories(hull_common PUBLIC common)
 target_link_libraries(hull_common PUBLIC SFML::Graphics)
 target_compile_definitions(hull_common PRIVATE HULL_PROJECT_DIR="${CMAKE_SOURCE_DIR}")
 
-# One executable per algorithm.
-add_executable(andrew algorithms/andrew.cpp)
-target_link_libraries(andrew PRIVATE hull_common)
+# One program with all algorithms (menu to choose one).
+add_executable(hull
+  main.cpp
+  algorithms/andrew.cpp
+  algorithms/quickhull.cpp
+)
+target_link_libraries(hull PRIVATE hull_common)
