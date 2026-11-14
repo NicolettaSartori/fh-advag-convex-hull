@@ -14,7 +14,19 @@ Browser:
    http://localhost:6080/vnc.html
    ```
 
-TODO build version
+## Run the existing build
+Once the program has been built (see above), you can start it again without compiling:
+
+Visualization:
+   ```bash
+   docker compose run --rm --service-ports dev ./build/hull
+   ```
+
+Benchmark (results in `src/protocol/<algorithm>.csv`):
+   ```bash
+   docker compose run --rm dev ./build/hull --bench
+   ```
+
 
 # Development
 ## First time

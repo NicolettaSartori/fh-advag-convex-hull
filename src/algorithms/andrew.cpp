@@ -19,9 +19,6 @@ std::string str(const Point& p) {
     return buf;
 }
 
-// Snapshot of the partial hull hull[0..k) for the visualization.
-// During the upper hull phase (lowerEnd > 0) it is split into the finished
-// lower chain and the growing upper chain.
 Step snapshot(const std::vector<Point>& hull, std::size_t k, std::size_t lowerEnd, std::string text) {
     Step s;
     s.description = std::move(text);
@@ -51,7 +48,7 @@ std::vector<Point> andrew(std::vector<Point> pts, Tracer& trace) {
         return pts;
     }
 
-    // hull[0..k) is used as a stack. Lower and upper hull together have at most 2n points.
+    // stack
     std::vector<Point> hull(2 * n);
     std::size_t k = 0;
     std::size_t lowerEnd = 0;
@@ -59,16 +56,14 @@ std::vector<Point> andrew(std::vector<Point> pts, Tracer& trace) {
     if constexpr (Tracer::enabled)
         trace.record(snapshot(hull, k, lowerEnd, "Points are sorted by x. Build the lower hull from left to right."));
 
-    // Removes points from the stack until hull[k-2] -> hull[k-1] -> p is a left turn.
-    // minK: the stack must keep at least this many points.
     const auto popUntilLeftTurn = [&](const Point& p, std::size_t minK, const char* phase) {
         while (k > minK) {
             const bool left = cross(hull[k - 2], hull[k - 1], p) > 0;
             if constexpr (Tracer::enabled) {
                 Step s = snapshot(hull, k, lowerEnd,
-                                  std::string(phase) + ": " +
-                                      (left ? "left turn at " + str(hull[k - 1]) + " -> keep it."
-                                            : "no left turn at " + str(hull[k - 1]) + " -> remove it."));
+                      std::string(phase) + ": " +
+                          (left ? "left turn at " + str(hull[k - 1]) + " -> keep it."
+                                : "no left turn at " + str(hull[k - 1]) + " -> remove it."));
                 s.tested = {{hull[k - 2], hull[k - 1]}, {hull[k - 1], p}};
                 s.current = {p};
                 if (!left) s.rejected = {hull[k - 1]};
@@ -79,10 +74,11 @@ std::vector<Point> andrew(std::vector<Point> pts, Tracer& trace) {
         }
     };
 
-    // Lower hull: left to right.
+    // Lower hull
     for (std::size_t i = 0; i < n; ++i) {
         popUntilLeftTurn(pts[i], 1, "Lower hull");
-        hull[k++] = pts[i];
+        hull[k] = pts[i];
+        k++;
         if constexpr (Tracer::enabled) {
             Step s = snapshot(hull, k, lowerEnd, "Lower hull: add " + str(pts[i]) + ".");
             s.current = {pts[i]};
@@ -90,18 +86,18 @@ std::vector<Point> andrew(std::vector<Point> pts, Tracer& trace) {
         }
     }
 
-    // Upper hull: right to left. The rightmost point is already on the stack,
-    // and the finished lower hull hull[0..lowerEnd) must not be touched.
+    // Upper hull
     lowerEnd = k;
     if constexpr (Tracer::enabled)
         trace.record(snapshot(hull, k, lowerEnd, "Lower hull done. Build the upper hull from right to left."));
 
     for (std::size_t i = n - 1; i-- > 0;) {
         popUntilLeftTurn(pts[i], lowerEnd, "Upper hull");
-        hull[k++] = pts[i];
+        hull[k] = pts[i];
+        k++;
         if constexpr (Tracer::enabled) {
             Step s = snapshot(hull, k, lowerEnd,
-                              i == 0 ? "Upper hull reached the start point again." : "Upper hull: add " + str(pts[i]) + ".");
+                i == 0 ? "Upper hull reached the start point again." : "Upper hull: add " + str(pts[i]) + ".");
             s.current = {pts[i]};
             trace.record(std::move(s));
         }
