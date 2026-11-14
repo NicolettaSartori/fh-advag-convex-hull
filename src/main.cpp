@@ -1,33 +1,37 @@
 #include <SFML/Graphics.hpp>
 
+#include <cstdint>
+#include <cstdlib>
+#include <optional>
+
 int main()
 {
-    sf::RenderWindow window(sf::VideoMode(800, 600), "Hallo SFML!");
+    sf::RenderWindow window(sf::VideoMode({800, 600}), "Hallo SFML!");
     window.setFramerateLimit(60);
 
     sf::CircleShape ball(40.f);
     ball.setFillColor(sf::Color(0, 200, 120));
-    ball.setPosition(100.f, 100.f);
+    ball.setPosition({100.f, 100.f});
     sf::Vector2f velocity(4.f, 3.f);
 
-    sf::Font font;
-    font.loadFromFile("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-    sf::Text text("Beliebige Taste: Farbe | ESC: Beenden", font, 22);
-    text.setPosition(20.f, 20.f);
+    const sf::Font font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    sf::Text text(font, "Beliebige Taste: Farbe | ESC: Beenden", 22);
+    text.setPosition({20.f, 20.f});
+
+    const auto randomByte = [] { return static_cast<std::uint8_t>(std::rand() % 256); };
 
     while (window.isOpen())
     {
-        sf::Event event;
-        while (window.pollEvent(event))
+        while (const std::optional event = window.pollEvent())
         {
-            if (event.type == sf::Event::Closed)
+            if (event->is<sf::Event::Closed>())
                 window.close();
-            if (event.type == sf::Event::KeyPressed)
+            else if (const auto* key = event->getIf<sf::Event::KeyPressed>())
             {
-                if (event.key.code == sf::Keyboard::Escape)
+                if (key->code == sf::Keyboard::Key::Escape)
                     window.close();
                 else
-                    ball.setFillColor(sf::Color(rand() % 256, rand() % 256, rand() % 256));
+                    ball.setFillColor(sf::Color(randomByte(), randomByte(), randomByte()));
             }
         }
 

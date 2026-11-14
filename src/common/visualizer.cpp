@@ -7,6 +7,7 @@
 #include <cmath>
 #include <exception>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 
@@ -50,23 +51,23 @@ bool insidePlot(sf::Vector2f v) {
     return v.x >= MARGIN && v.x <= MARGIN + PLOT && v.y >= MARGIN && v.y <= MARGIN + PLOT;
 }
 
-// Thick line as a quad (sf::Lines is always 1px wide).
-void addLine(sf::VertexArray& quads, sf::Vector2f a, sf::Vector2f b, float width, sf::Color c) {
-    const sf::Vector2f d = b - a;
-    const float len = std::sqrt(d.x * d.x + d.y * d.y);
-    if (len < 1e-4f) return;
-    const sf::Vector2f n(-d.y / len * width / 2, d.x / len * width / 2);
-    quads.append({a + n, c});
-    quads.append({b + n, c});
-    quads.append({b - n, c});
-    quads.append({a - n, c});
+// SFML 3 has no quads anymore: every rectangle is drawn as two triangles.
+void addQuad(sf::VertexArray& triangles, sf::Vector2f a, sf::Vector2f b, sf::Vector2f c, sf::Vector2f d,
+             sf::Color col) {
+    for (const sf::Vector2f p : {a, b, c, a, c, d}) triangles.append(sf::Vertex{p, col});
 }
 
-void addDot(sf::VertexArray& quads, sf::Vector2f p, float r, sf::Color c) {
-    quads.append({{p.x - r, p.y - r}, c});
-    quads.append({{p.x + r, p.y - r}, c});
-    quads.append({{p.x + r, p.y + r}, c});
-    quads.append({{p.x - r, p.y + r}, c});
+// Thick line (sf::PrimitiveType::Lines is always 1px wide).
+void addLine(sf::VertexArray& triangles, sf::Vector2f a, sf::Vector2f b, float width, sf::Color c) {
+    const sf::Vector2f d = b - a;
+    const float len = d.length();
+    if (len < 1e-4f) return;
+    const sf::Vector2f n = sf::Vector2f(-d.y, d.x) * (width / 2 / len);
+    addQuad(triangles, a + n, b + n, b - n, a - n, c);
+}
+
+void addDot(sf::VertexArray& triangles, sf::Vector2f p, float r, sf::Color c) {
+    addQuad(triangles, {p.x - r, p.y - r}, {p.x + r, p.y - r}, {p.x + r, p.y + r}, {p.x - r, p.y + r}, c);
 }
 
 std::string wrap(const std::string& text, std::size_t width) {
@@ -85,9 +86,10 @@ std::string wrap(const std::string& text, std::size_t width) {
 class Visualizer {
 public:
     explicit Visualizer(const HullAlgorithm& algo)
-        : algo_(algo), window_(sf::VideoMode(WINDOW_W, WINDOW_H), algo.name, sf::Style::Titlebar | sf::Style::Close) {
+        : algo_(algo),
+          window_(sf::VideoMode({WINDOW_W, WINDOW_H}), algo.name, sf::Style::Titlebar | sf::Style::Close) {
         window_.setFramerateLimit(60);
-        hasFont_ = font_.loadFromFile(FONT_PATH);
+        hasFont_ = font_.openFromFile(FONT_PATH);
         if (!hasFont_) std::cerr << "Font not found (" << FONT_PATH << "), text is not shown.\n";
         setPoints(randomPoints(RANDOM_POINTS, rng_()), "random");
     }
@@ -95,8 +97,7 @@ public:
     void run() {
         sf::Clock clock;
         while (window_.isOpen()) {
-            sf::Event event;
-            while (window_.pollEvent(event)) handle(event);
+            while (const std::optional event = window_.pollEvent()) handle(*event);
             update(clock.restart().asSeconds());
             draw();
         }
@@ -126,8 +127,8 @@ private:
         steps_ = algo_.computeSteps(points_);
         index_ = std::min(index_, lastStep());
         const float r = points_.size() > 200 ? 1.5f : 3.5f;
-        pointQuads_.clear();
-        for (const Point& p : points_) addDot(pointQuads_, toScreen(p), r, color::point);
+        pointDots_.clear();
+        for (const Point& p : points_) addDot(pointDots_, toScreen(p), r, color::point);
     }
 
     std::size_t lastStep() const { return steps_.empty() ? 0 : steps_.size() - 1; }
@@ -144,10 +145,7 @@ private:
     }
 
     void removePoint(sf::Vector2f pixel) {
-        const auto distance = [&](const Point& p) {
-            const sf::Vector2f d = toScreen(p) - pixel;
-            return d.x * d.x + d.y * d.y;
-        };
+        const auto distance = [&](const Point& p) { return (toScreen(p) - pixel).lengthSquared(); };
         const auto it = std::min_element(points_.begin(), points_.end(),
                                          [&](const Point& a, const Point& b) { return distance(a) < distance(b); });
         if (it == points_.end() || distance(*it) > 10.f * 10.f) return;
@@ -160,34 +158,35 @@ private:
     // ---- input -----------------------------------------------------------
 
     void handle(const sf::Event& event) {
-        if (event.type == sf::Event::Closed) {
+        if (event.is<sf::Event::Closed>()) {
             window_.close();
-        } else if (event.type == sf::Event::KeyPressed) {
-            switch (event.key.code) {
-                case sf::Keyboard::Escape: window_.close(); break;
-                case sf::Keyboard::Right: playing_ = false; goTo(static_cast<long>(index_) + 1); break;
-                case sf::Keyboard::Left: playing_ = false; goTo(static_cast<long>(index_) - 1); break;
-                case sf::Keyboard::Home: goTo(0); break;
-                case sf::Keyboard::End: goTo(static_cast<long>(lastStep())); break;
-                case sf::Keyboard::Up: speed_ = std::min(speed_ + 1, SPEED_COUNT - 1); break;
-                case sf::Keyboard::Down: speed_ = std::max(speed_ - 1, 0); break;
-                case sf::Keyboard::Space:
+        } else if (const auto* key = event.getIf<sf::Event::KeyPressed>()) {
+            using Key = sf::Keyboard::Key;
+            switch (key->code) {
+                case Key::Escape: window_.close(); break;
+                case Key::Right: playing_ = false; goTo(static_cast<long>(index_) + 1); break;
+                case Key::Left: playing_ = false; goTo(static_cast<long>(index_) - 1); break;
+                case Key::Home: goTo(0); break;
+                case Key::End: goTo(static_cast<long>(lastStep())); break;
+                case Key::Up: speed_ = std::min(speed_ + 1, SPEED_COUNT - 1); break;
+                case Key::Down: speed_ = std::max(speed_ - 1, 0); break;
+                case Key::Space:
                     if (index_ == lastStep()) goTo(0);
                     playing_ = !playing_;
                     progress_ = 0;
                     break;
-                case sf::Keyboard::N: setPoints(randomPoints(RANDOM_POINTS, rng_()), "random"); break;
-                case sf::Keyboard::C: setPoints({}, "empty"); break;
-                case sf::Keyboard::Num1: loadFile("square_1k"); break;
-                case sf::Keyboard::Num2: loadFile("disk_1k"); break;
-                case sf::Keyboard::Num3: loadFile("circle_1k"); break;
+                case Key::N: setPoints(randomPoints(RANDOM_POINTS, rng_()), "random"); break;
+                case Key::C: setPoints({}, "empty"); break;
+                case Key::Num1: loadFile("square_1k"); break;
+                case Key::Num2: loadFile("disk_1k"); break;
+                case Key::Num3: loadFile("circle_1k"); break;
                 default: break;
             }
-        } else if (event.type == sf::Event::MouseButtonPressed) {
-            const sf::Vector2f pixel = window_.mapPixelToCoords({event.mouseButton.x, event.mouseButton.y});
+        } else if (const auto* mouse = event.getIf<sf::Event::MouseButtonPressed>()) {
+            const sf::Vector2f pixel = window_.mapPixelToCoords(mouse->position);
             if (!insidePlot(pixel)) return;
-            if (event.mouseButton.button == sf::Mouse::Left) addPoint(pixel);
-            if (event.mouseButton.button == sf::Mouse::Right) removePoint(pixel);
+            if (mouse->button == sf::Mouse::Button::Left) addPoint(pixel);
+            if (mouse->button == sf::Mouse::Button::Right) removePoint(pixel);
         }
     }
 
@@ -206,12 +205,12 @@ private:
         window_.clear(color::background);
 
         sf::RectangleShape plot({PLOT, PLOT});
-        plot.setPosition(MARGIN, MARGIN);
+        plot.setPosition({MARGIN, MARGIN});
         plot.setFillColor(color::plot);
         plot.setOutlineColor(color::border);
         plot.setOutlineThickness(1.f);
         window_.draw(plot);
-        window_.draw(pointQuads_);
+        window_.draw(pointDots_);
 
         if (!steps_.empty()) drawStep(steps_[index_]);
         drawPanel();
@@ -228,21 +227,21 @@ private:
             window_.draw(fill);
         }
 
-        sf::VertexArray quads(sf::Quads);
+        sf::VertexArray triangles(sf::PrimitiveType::Triangles);
         for (const auto& chain : step.chains) {
             for (std::size_t i = 0; i + 1 < chain.size(); ++i)
-                addLine(quads, toScreen(chain[i]), toScreen(chain[i + 1]), 2.5f, color::hull);
+                addLine(triangles, toScreen(chain[i]), toScreen(chain[i + 1]), 2.5f, color::hull);
             if (step.closed && chain.size() >= 2)
-                addLine(quads, toScreen(chain.back()), toScreen(chain.front()), 2.5f, color::hull);
+                addLine(triangles, toScreen(chain.back()), toScreen(chain.front()), 2.5f, color::hull);
         }
-        for (const auto& s : step.tested) addLine(quads, toScreen(s.a), toScreen(s.b), 2.f, color::tested);
+        for (const auto& s : step.tested) addLine(triangles, toScreen(s.a), toScreen(s.b), 2.f, color::tested);
         for (const auto& chain : step.chains)
-            for (const Point& p : chain) addDot(quads, toScreen(p), 3.5f, color::hull);
-        window_.draw(quads);
+            for (const Point& p : chain) addDot(triangles, toScreen(p), 3.5f, color::hull);
+        window_.draw(triangles);
 
         const auto ring = [&](const Point& p, sf::Color c) {
             sf::CircleShape circle(8.f);
-            circle.setOrigin(8.f, 8.f);
+            circle.setOrigin({8.f, 8.f});
             circle.setPosition(toScreen(p));
             circle.setFillColor(sf::Color::Transparent);
             circle.setOutlineColor(c);
@@ -255,15 +254,15 @@ private:
 
     void text(const std::string& str, float x, float y, unsigned size, sf::Color c) {
         if (!hasFont_) return;
-        sf::Text t(str, font_, size);
-        t.setPosition(x, y);
+        sf::Text t(font_, str, size);
+        t.setPosition({x, y});
         t.setFillColor(c);
         window_.draw(t);
     }
 
     void legend(float y, sf::Color c, const std::string& label) {
         sf::RectangleShape box({14.f, 14.f});
-        box.setPosition(PANEL_X, y + 3);
+        box.setPosition({PANEL_X, y + 3});
         box.setFillColor(c);
         window_.draw(box);
         text(label, PANEL_X + 24, y, 15, color::text);
@@ -319,7 +318,7 @@ private:
     std::string error_;
     std::vector<Step> steps_;
     std::size_t index_ = 0;
-    sf::VertexArray pointQuads_{sf::Quads};
+    sf::VertexArray pointDots_{sf::PrimitiveType::Triangles};
 
     bool playing_ = false;
     int speed_ = 3;

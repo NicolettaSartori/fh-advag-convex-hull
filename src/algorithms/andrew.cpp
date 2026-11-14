@@ -1,11 +1,4 @@
-// Andrew's Monotone Chain algorithm, O(n log n).
-//
-// 1. Sort the points by x (then y).
-// 2. Lower hull: go from left to right. Before adding a point, remove the last
-//    hull point as long as it does not make a left turn.
-// 3. Upper hull: the same from right to left.
-// 4. Lower + upper hull = convex hull (counter-clockwise).
-//
+// Andrew's Monotone Chain algorithm
 // Usage:
 //   ./build/andrew            interactive visualization
 //   ./build/andrew --bench    time measurements -> protocol/andrew.csv
