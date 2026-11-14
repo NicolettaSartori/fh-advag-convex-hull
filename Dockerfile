@@ -1,5 +1,3 @@
-# C++ + SFML Entwicklungsumgebung
-# Das Programmfenster wird über noVNC im Browser angezeigt: http://localhost:6080
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
