@@ -643,3 +643,4 @@ FodyWeavers.xsd
 # End of https://www.toptal.com/developers/gitignore/api/c++,clion,codeblocks,visualstudiocode,visualstudio,macos
 
 build/
+build-*/

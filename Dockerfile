@@ -37,7 +37,7 @@ RUN git clone --depth 1 --branch ${SFML_VERSION} https://github.com/SFML/SFML.gi
     && rm -rf /tmp/sfml
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 6080
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

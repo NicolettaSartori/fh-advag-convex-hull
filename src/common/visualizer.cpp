@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <random>
@@ -19,10 +21,67 @@ constexpr float MARGIN = 20.f;
 constexpr float PLOT = 720.f;  // the world square [0, WORLD_SIZE]^2 is drawn as PLOT x PLOT pixels
 constexpr float PANEL_X = 2 * MARGIN + PLOT;
 constexpr std::size_t RANDOM_POINTS = 10;
-const char* const FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 const char* const MENU_TITLE = "Convex Hull";
 const int SPEEDS[] = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000};  // steps per second
 constexpr int SPEED_COUNT = sizeof(SPEEDS) / sizeof(SPEEDS[0]);
+
+bool loadDefaultFont(sf::Font& font) {
+    std::vector<std::filesystem::path> candidates;
+
+#ifdef _WIN32
+    const char* winDir = std::getenv("WINDIR");
+    const std::filesystem::path fontsDir = std::filesystem::path(winDir ? winDir : "C:\\Windows") / "Fonts";
+    for (const char* name : {"segoeui.ttf", "arial.ttf", "calibri.ttf", "tahoma.ttf", "verdana.ttf", "consola.ttf"}) {
+        candidates.push_back(fontsDir / name);
+    }
+#elif defined(__APPLE__)
+    candidates = {
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/Library/Fonts/Arial.ttf",
+    };
+#else
+    candidates = {
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "/usr/share/fonts/gnu-free/FreeSans.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf",
+    };
+#endif
+
+    for (const auto& path : candidates) {
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(path, ec) && font.openFromFile(path)) {
+            return true;
+        }
+    }
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+    std::error_code ec;
+    const std::filesystem::path systemFonts("/usr/share/fonts");
+    if (std::filesystem::is_directory(systemFonts, ec)) {
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(
+                 systemFonts, std::filesystem::directory_options::skip_permission_denied, ec)) {
+            if (ec) break;
+            if (!entry.is_regular_file(ec)) continue;
+            const auto ext = entry.path().extension().string();
+            if ((ext == ".ttf" || ext == ".otf") && font.openFromFile(entry.path())) {
+                return true;
+            }
+        }
+    }
+#endif
+
+    return false;
+}
 
 namespace color {
 const sf::Color background(24, 26, 33);
@@ -438,8 +497,8 @@ void runVisualizer(const std::vector<HullAlgorithm>& algos) {
     window.setFramerateLimit(60);
 
     sf::Font fontStorage;
-    const sf::Font* font = fontStorage.openFromFile(FONT_PATH) ? &fontStorage : nullptr;
-    if (!font) std::cerr << "Font not found (" << FONT_PATH << "), text is not shown.\n";
+    const sf::Font* font = loadDefaultFont(fontStorage) ? &fontStorage : nullptr;
+    if (!font) std::cerr << "No system font found, text is not shown.\n";
 
     std::vector<Button> buttons;
     for (std::size_t i = 0; i < algos.size(); ++i) {

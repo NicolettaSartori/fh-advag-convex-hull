@@ -1,21 +1,32 @@
 #include "dataset.h"
 
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <random>
 #include <stdexcept>
 
 std::string projectPath(const std::string& relative) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
 #ifdef HULL_PROJECT_DIR
-    return std::string(HULL_PROJECT_DIR) + "/" + relative;
-#else
-    return relative;
+    const fs::path base(HULL_PROJECT_DIR);
+    if (fs::is_directory(base, ec)) {
+        return (base / relative).lexically_normal().string();
+    }
 #endif
+    if (fs::is_directory(fs::path("data"), ec)) {
+        return relative;
+    }
+    if (fs::is_directory(fs::path("src") / "data", ec)) {
+        return (fs::path("src") / relative).lexically_normal().string();
+    }
+    return relative;
 }
 
 std::vector<Point> loadPoints(const std::string& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open " + path);
 
     // Read the whole file at once and parse it with strtod: much faster than
