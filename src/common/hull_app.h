@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 struct HullAlgorithm {
@@ -22,6 +23,10 @@ struct HullAlgorithm {
 
     // Version that records every step (used for the visualization).
     std::function<std::vector<Step>(std::vector<Point>)> computeSteps;
+
+    // Legend shown in the visualizer: what each role means for this algorithm.
+    // Only the roles listed here are explained in the side panel.
+    std::vector<std::pair<Role, std::string>> legend;
 
     // Not implemented yet: the menu shows a TODO page, the benchmark skips it.
     bool implemented() const { return compute && computeSteps; }

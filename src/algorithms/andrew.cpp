@@ -6,18 +6,11 @@
 #include "algorithms.h"
 
 #include <algorithm>
-#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
-
-std::string str(const Point& p) {
-    char buf[48];
-    std::snprintf(buf, sizeof buf, "(%.1f, %.1f)", p.x, p.y);
-    return buf;
-}
 
 Step snapshot(const std::vector<Point>& hull, std::size_t k, std::size_t lowerEnd, std::string text) {
     Step s;
@@ -121,6 +114,12 @@ HullAlgorithm makeAndrew() {
     HullAlgorithm algo;
     algo.id = "andrew";
     algo.name = "Andrew's Monotone Chain";
+    algo.legend = {
+        {Role::Hull, "Hull (so far)"},
+        {Role::Tested, "Edges being checked"},
+        {Role::Current, "Current point"},
+        {Role::Rejected, "Point being removed"},
+    };
     algo.compute = [](std::vector<Point> pts) {
         NoTrace trace;
         return andrew(std::move(pts), trace);

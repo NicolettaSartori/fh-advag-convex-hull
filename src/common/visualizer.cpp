@@ -36,8 +36,23 @@ const sf::Color hullFill(80, 200, 140, 40);
 const sf::Color tested(255, 170, 60);
 const sf::Color current(255, 230, 80);
 const sf::Color rejected(240, 80, 80);
+const sf::Color candidate(90, 160, 255);
+const sf::Color discarded(58, 62, 76);
 const sf::Color text(220, 224, 232);
 const sf::Color dim(140, 146, 160);
+
+// How a Role (see trace.h) looks. Used for drawing and for the legend.
+sf::Color of(Role role) {
+    switch (role) {
+        case Role::Hull: return hull;
+        case Role::Tested: return tested;
+        case Role::Candidate: return candidate;
+        case Role::Discarded: return discarded;
+        case Role::Current: return current;
+        case Role::Rejected: return rejected;
+    }
+    return text;
+}
 }  // namespace color
 
 // What to do after a screen is left.
@@ -184,9 +199,9 @@ private:
     void recompute() {
         steps_ = algo_.computeSteps(points_);
         index_ = std::min(index_, lastStep());
-        const float r = points_.size() > 200 ? 1.5f : 3.5f;
+        pointRadius_ = points_.size() > 200 ? 1.5f : 3.5f;
         pointDots_.clear();
-        for (const Point& p : points_) addDot(pointDots_, toScreen(p), r, color::point);
+        for (const Point& p : points_) addDot(pointDots_, toScreen(p), pointRadius_, color::point);
     }
 
     std::size_t lastStep() const { return steps_.empty() ? 0 : steps_.size() - 1; }
@@ -290,15 +305,19 @@ private:
         }
 
         sf::VertexArray triangles(sf::PrimitiveType::Triangles);
+        for (const Point& p : step.discarded)
+            addDot(triangles, toScreen(p), pointRadius_, color::of(Role::Discarded));
+        for (const Point& p : step.candidates)
+            addDot(triangles, toScreen(p), pointRadius_ + 0.5f, color::of(Role::Candidate));
         for (const auto& chain : step.chains) {
             for (std::size_t i = 0; i + 1 < chain.size(); ++i)
-                addLine(triangles, toScreen(chain[i]), toScreen(chain[i + 1]), 2.5f, color::hull);
+                addLine(triangles, toScreen(chain[i]), toScreen(chain[i + 1]), 2.5f, color::of(Role::Hull));
             if (step.closed && chain.size() >= 2)
-                addLine(triangles, toScreen(chain.back()), toScreen(chain.front()), 2.5f, color::hull);
+                addLine(triangles, toScreen(chain.back()), toScreen(chain.front()), 2.5f, color::of(Role::Hull));
         }
-        for (const auto& s : step.tested) addLine(triangles, toScreen(s.a), toScreen(s.b), 2.f, color::tested);
+        for (const auto& s : step.tested) addLine(triangles, toScreen(s.a), toScreen(s.b), 2.f, color::of(Role::Tested));
         for (const auto& chain : step.chains)
-            for (const Point& p : chain) addDot(triangles, toScreen(p), 3.5f, color::hull);
+            for (const Point& p : chain) addDot(triangles, toScreen(p), 3.5f, color::of(Role::Hull));
         window_.draw(triangles);
 
         const auto ring = [&](const Point& p, sf::Color c) {
@@ -310,15 +329,15 @@ private:
             circle.setOutlineThickness(2.f);
             window_.draw(circle);
         };
-        for (const Point& p : step.current) ring(p, color::current);
-        for (const Point& p : step.rejected) ring(p, color::rejected);
+        for (const Point& p : step.current) ring(p, color::of(Role::Current));
+        for (const Point& p : step.rejected) ring(p, color::of(Role::Rejected));
     }
 
     void text(const std::string& str, float x, float y, unsigned size, sf::Color c) {
         drawText(window_, font_, str, {x, y}, size, c);
     }
 
-    void legend(float y, sf::Color c, const std::string& label) {
+    void legendEntry(float y, sf::Color c, const std::string& label) {
         sf::RectangleShape box({14.f, 14.f});
         box.setPosition({PANEL_X, y + 3});
         box.setFillColor(c);
@@ -332,25 +351,26 @@ private:
 
         std::ostringstream info;
         info << "Points: " << points_.size() << "   (" << source_ << ")\n"
-             << "Step: " << (steps_.empty() ? 0 : index_ + 1) << " / " << steps_.size() << "\n"
-             << (playing_ ? "Playing" : "Paused") << ", speed " << SPEEDS[speed_] << " steps/s";
+             << "Step: " << (steps_.empty() ? 0 : index_ + 1) << " / " << steps_.size();
+        if (!steps_.empty() && index_ == lastStep() && !steps_.back().chains.empty())
+            info << "   Hull points: " << steps_.back().chains[0].size();
+        info << "\n" << (playing_ ? "Playing" : "Paused") << ", speed " << SPEEDS[speed_] << " steps/s";
         text(info.str(), x, 62, 16, color::text);
 
-        if (!steps_.empty()) {
-            const Step& step = steps_[index_];
-            text(wrap(step.description, 46), x, 140, 17, color::current);
-            if (step.closed && !step.chains.empty())
-                text("Hull points: " + std::to_string(step.chains[0].size()), x, 215, 17, color::hull);
-        } else {
+        if (!steps_.empty())
+            text(wrap(steps_[index_].description, 46), x, 140, 17, color::current);
+        else
             text("No points. Left click to add some.", x, 140, 17, color::dim);
+
+        // Legend: only the roles this algorithm uses, with its own meaning.
+        float y = 255;
+        for (const auto& [role, label] : algo_.legend) {
+            legendEntry(y, color::of(role), label);
+            y += 24;
         }
 
-        legend(260, color::hull, "Hull (so far)");
-        legend(284, color::tested, "Edges being checked");
-        legend(308, color::current, "Current point");
-        legend(332, color::rejected, "Point being removed");
-
-        text("Right / Left\nSpace\nUp / Down\nHome / End\nLeft click\nRight click\nN\n1 / 2 / 3\nC\nEsc", x, 380, 15,
+        y += 20;
+        text("Right / Left\nSpace\nUp / Down\nHome / End\nLeft click\nRight click\nN\n1 / 2 / 3\nC\nEsc", x, y, 15,
              color::dim);
         text("next / previous step\n"
              "play / pause\n"
@@ -362,9 +382,9 @@ private:
              "square / disk / circle 1k\n"
              "clear all points\n"
              "back to the menu",
-             x + 120, 380, 15, color::dim);
+             x + 120, y, 15, color::dim);
 
-        if (!error_.empty()) text(wrap(error_, 46), x, 600, 15, color::rejected);
+        if (!error_.empty()) text(wrap(error_, 46), x, 630, 15, color::rejected);
         back_.draw(window_, font_);
     }
 
@@ -380,6 +400,7 @@ private:
     std::vector<Step> steps_;
     std::size_t index_ = 0;
     sf::VertexArray pointDots_{sf::PrimitiveType::Triangles};
+    float pointRadius_ = 3.5f;
 
     bool playing_ = false;
     int speed_ = 3;
