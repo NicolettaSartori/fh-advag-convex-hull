@@ -1,20 +1,3 @@
-// Quickhull algorithm - Georg's implementation (georgs_code/Quickhull.h).
-// Usage:
-//   ./build/hull                     menu -> visualization
-//   ./build/hull --bench quickhull   time measurements -> protocol/quickhull.csv
-//
-// partition(), findHullPoints() and calculateQuickhullPoints() are Georg's code
-// unchanged (Coordinate2d with float, int indices, in-place 3-way partitioning).
-// Only the recording was replaced so that it works like in andrew.cpp:
-//   Georg:  std::vector<DrawCommand>* drawCommands, QuickhullStats* stats
-//   here:   Tracer& trace  (NoTrace / StepRecorder, see trace.h)
-// The stats counters (partition calls, recursions, max depth, cross products)
-// belonged to his own HUD and were removed together with the depth parameter.
-//
-// The rest of the project uses Point (double), so the adapters at the bottom
-// convert the input to Coordinate2d and the result back to Point.
-// Note: the hull comes back in Georg's order (clockwise, starting at the leftmost point).
-
 #include "algorithms.h"
 
 #include "Coordinate2d.h"
