@@ -1,260 +1,311 @@
+// Quickhull algorithm - Georg's implementation (georgs_code/Quickhull.h).
+// Usage:
+//   ./build/hull                     menu -> visualization
+//   ./build/hull --bench quickhull   time measurements -> protocol/quickhull.csv
+//
+// partition(), findHullPoints() and calculateQuickhullPoints() are Georg's code
+// unchanged (Coordinate2d with float, int indices, in-place 3-way partitioning).
+// Only the recording was replaced so that it works like in andrew.cpp:
+//   Georg:  std::vector<DrawCommand>* drawCommands, QuickhullStats* stats
+//   here:   Tracer& trace  (NoTrace / StepRecorder, see trace.h)
+// The stats counters (partition calls, recursions, max depth, cross products)
+// belonged to his own HUD and were removed together with the depth parameter.
+//
+// The rest of the project uses Point (double), so the adapters at the bottom
+// convert the input to Coordinate2d and the result back to Point.
+// Note: the hull comes back in Georg's order (clockwise, starting at the leftmost point).
+
 #include "algorithms.h"
+
+#include "Coordinate2d.h"
 
 #include <algorithm>
 #include <cstddef>
+#include <iostream>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
 
-using Index = std::ptrdiff_t;
+// ---- visualization helpers (only used when tracing) ------------------------
 
-// > 0: p is outside of the directed hull edge a -> b (strictly right of it).
-// The edge direction is computed once per loop instead of once per point.
-struct Edge {
-    Point a;
-    double dx;
-    double dy;
+Point toPoint(const Coordinate2d& c) {
+    return {c.x, c.y};
+}
 
-    Edge(const Point& from, const Point& to) : a(from), dx(to.x - from.x), dy(to.y - from.y) {}
+std::vector<Point> toPoints(const std::vector<Coordinate2d>& cs) {
+    std::vector<Point> result;
+    result.reserve(cs.size());
+    for (const Coordinate2d& c : cs) result.push_back(toPoint(c));
+    return result;
+}
 
-    double outside(const Point& p) const { return dy * (p.x - a.x) - dx * (p.y - a.y); }
+std::string str(const Coordinate2d& c) {
+    return ::str(toPoint(c));
+}
 
-    // How far p lies in the direction a -> b (only used to break ties).
-    double along(const Point& p) const { return dx * (p.x - a.x) + dy * (p.y - a.y); }
+// Wraps StepRecorder and keeps the extra state the step view needs:
+// hull points found so far (in order) and the points that were dropped.
+template <class Tracer>
+struct QuickhullTrace {
+    static constexpr bool enabled = Tracer::enabled;
+
+    Tracer& out;
+    const std::vector<Coordinate2d>* points = nullptr;
+    std::vector<Point> known;      // hull points found so far, in hull order
+    std::vector<Point> discarded;  // points that can no longer be on the hull
+
+    void discard(int first, int last) {
+        for (int i = first; i <= last; ++i) discarded.push_back(toPoint((*points)[static_cast<std::size_t>(i)]));
+    }
+
+    // A new hull point c always lies between a and b: insert it right after a.
+    void addHullPoint(const Coordinate2d& a, const Coordinate2d& c) {
+        const auto it = std::find(known.begin(), known.end(), toPoint(a));
+        known.insert(it == known.end() ? known.end() : it + 1, toPoint(c));
+    }
+
+    void record(std::string text, std::vector<Segment> tested = {}, std::vector<Point> current = {}) {
+        Step s;
+        s.description = std::move(text);
+        s.chains.push_back(known);
+        s.closed = true;
+        s.tested = std::move(tested);
+        s.current = std::move(current);
+        s.discarded = discarded;
+
+        // Still undecided: neither a known hull point nor dropped.
+        std::vector<Point> decided = discarded;
+        decided.insert(decided.end(), known.begin(), known.end());
+        std::sort(decided.begin(), decided.end());
+        for (const Coordinate2d& c : *points)
+            if (!std::binary_search(decided.begin(), decided.end(), toPoint(c))) s.candidates.push_back(toPoint(c));
+        out.record(std::move(s));
+    }
+
+    void recordFinal(const std::vector<Coordinate2d>& hull, std::string text) {
+        Step s;
+        s.description = std::move(text);
+        s.chains.push_back(toPoints(hull));
+        s.closed = true;
+        s.discarded = discarded;
+        out.record(std::move(s));
+    }
 };
 
-struct Partition {
-    Index middle;  // first index that is not outside
-    Index end;     // last index that is not on the line
+// ---- Georg's algorithm -------------------------------------------------------
+
+struct partitionResult {
+    int middle; // last index left of ab
+    int end;    // last index that isn't collinear
 };
 
-// Reorders pts[first..last] into three groups (3-way partitioning):
-//   [first, middle)   outside of a -> b
-//   [middle, end]     strictly inside of a -> b
-//   (end, last]       on the line through a and b
-Partition partition(std::vector<Point>& pts, Index first, Index last, const Point& a, const Point& b) {
-    const Edge edge(a, b);
-    Index end = last;
+template<typename A>
+partitionResult partition(
+    A& points,
+    int first,
+    int last,
+    const Coordinate2d a,
+    const Coordinate2d b
+) {
+    const float dx = b.x - a.x;
+    const float dy = b.y - a.y;
+    int end = last; // last element that isn't collinear with AB
     while (first <= last) {
-        const double side = edge.outside(pts[first]);
-        if (side > 0) {
-            // outside -> stays at the front
-            ++first;
-        } else if (side < 0) {
-            // inside -> swap to the back
-            std::swap(pts[first], pts[last]);
+        if (const float result = crossProductEdge(a, dx, dy, points[static_cast<std::size_t>(first)]); result > 0) {
+            // left of AB (top) -> leave in place
+            first++;
+        }
+        else if (result < 0) {
+            // right of AB (bottom) -> swap to right
+            std::swap(points[static_cast<std::size_t>(first)], points[static_cast<std::size_t>(last)]);
             --last;
-        } else {
-            // on the line -> swap behind the inside points
-            const Point temp = pts[first];
-            pts[first] = pts[last];
-            pts[last] = pts[end];
-            pts[end] = temp;
+        }
+        else {
+            // collinear on AB -> swap to back
+            Coordinate2d temp = points[static_cast<std::size_t>(first)];
+            points[static_cast<std::size_t>(first)] = points[static_cast<std::size_t>(last)];
+            points[static_cast<std::size_t>(last)] = points[static_cast<std::size_t>(end)];
+            points[static_cast<std::size_t>(end)] = temp;
             --last;
             --end;
         }
     }
-    return {first, end};
+
+    return partitionResult{.middle = first, .end = end};
 }
 
-template <class Tracer>
-class Quickhull {
-public:
-    Quickhull(std::vector<Point>& pts, Tracer& trace) : pts_(pts), trace_(trace) {}
-
-    std::vector<Point> run() {
-        const Index n = static_cast<Index>(pts_.size());
-        if (n == 0) return {};
-
-        // Leftmost (smallest x, then smallest y) and rightmost (largest x, then largest y) point.
-        Index minI = 0;
-        Index maxI = 0;
-        for (Index i = 1; i < n; ++i) {
-            if (pts_[i] < pts_[minI]) minI = i;
-            if (pts_[maxI] < pts_[i]) maxI = i;
+template<typename A, typename T>
+void findHullPoints(
+    A& points,
+    int first,
+    int last,
+    Coordinate2d a,
+    Coordinate2d b,
+    std::vector<Coordinate2d>& hullPoints,
+    T& trace
+) {
+    if (first > last) {
+        if constexpr (T::enabled)
+            trace.record("No points left of " + str(a) + " -> " + str(b) + ": this is a hull edge.",
+                         {{toPoint(a), toPoint(b)}});
+        return;
+    }
+    if (first == last) {
+        if constexpr (T::enabled) {
+            const Coordinate2d c = points[static_cast<std::size_t>(last)];
+            trace.addHullPoint(a, c);
+            trace.record("Only one point left of " + str(a) + " -> " + str(b) + ": " + str(c) + " is a hull point.",
+                         {{toPoint(a), toPoint(c)}, {toPoint(c), toPoint(b)}}, {toPoint(c)});
         }
-
-        if (pts_[minI] == pts_[maxI]) {
-            // All points are identical.
-            hull_.push_back(pts_[minI]);
-            if constexpr (Tracer::enabled) record(finalStep("All points are identical: the hull is one point."));
-            return hull_;
-        }
-
-        // Move A to the front and B to the back, the rest is in between.
-        std::swap(pts_[0], pts_[minI]);
-        if (maxI == 0) maxI = minI;
-        std::swap(pts_[n - 1], pts_[maxI]);
-        const Point a = pts_[0];
-        const Point b = pts_[n - 1];
-
-        if constexpr (Tracer::enabled) {
-            known_ = {a, b};
-            Step s = snapshot("Leftmost point A " + str(a) + " and rightmost point B " + str(b) +
-                              " are on the hull.");
-            s.current = {a, b};
-            record(std::move(s));
-        }
-
-        // Below the line A-B (outside of A -> B) | above the line | on the line
-        const Partition p = partition(pts_, 1, n - 2, a, b);
-
-        if constexpr (Tracer::enabled) {
-            discard(p.end + 1, n - 2);
-            Step s = snapshot("The line A-B splits the points: " + std::to_string(p.middle - 1) + " below, " +
-                              std::to_string(p.end - p.middle + 1) + " above. Both sides are solved separately.");
-            s.tested = {{a, b}};
-            record(std::move(s));
-        }
-
-        hull_.reserve(64);
-        hull_.push_back(a);
-        findHull(1, p.middle - 1, a, b);  // lower hull, from A to B
-        hull_.push_back(b);
-        findHull(p.middle, p.end, b, a);  // upper hull, from B back to A
-
-        if constexpr (Tracer::enabled)
-            record(finalStep("Done: the convex hull has " + std::to_string(hull_.size()) + " points."));
-        return std::move(hull_);
+        hullPoints.push_back(points[static_cast<std::size_t>(last)]);
+        return;
     }
 
-private:
-    // pts_[first..last] are exactly the points outside of the edge a -> b.
-    // Appends the hull points between a and b (in this order) to hull_.
-    void findHull(Index first, Index last, const Point& a, const Point& b) {
-        if (first > last) {
-            if constexpr (Tracer::enabled) {
-                Step s = snapshot("No points outside of " + str(a) + " -> " + str(b) + ": this is a hull edge.");
-                s.tested = {{a, b}};
-                record(std::move(s));
-            }
-            return;
-        }
+    // find outermost point
+    int cIndex = first;
+    float maxCP = 0.0f;
+    const float dx = b.x - a.x;
+    const float dy = b.y - a.y;
 
-        if (first == last) {
-            // Only one point outside: it must be on the hull.
-            const Point c = pts_[first];
-            if constexpr (Tracer::enabled) {
-                insertKnown(a, c);
-                Step s = snapshot("Only one point outside of " + str(a) + " -> " + str(b) + ": " + str(c) +
-                                  " is a hull point.");
-                s.tested = {{a, c}, {c, b}};
-                s.current = {c};
-                record(std::move(s));
-            }
-            hull_.push_back(c);
-            return;
-        }
-
-        // Farthest point from the edge (largest cross product = largest distance).
-        // Tie: several points on a line parallel to the edge. Only the two ends of
-        // that line are hull points, so take the one farthest in direction a -> b
-        // (otherwise a point in the middle of a hull edge could be chosen).
-        const Edge edge(a, b);
-        Index cIndex = first;
-        double maxSide = 0;
-        for (Index i = first; i <= last; ++i) {
-            const double side = edge.outside(pts_[i]);
-            if (side > maxSide || (side == maxSide && edge.along(pts_[i]) > edge.along(pts_[cIndex]))) {
-                maxSide = side;
-                cIndex = i;
-            }
-        }
-        if (maxSide <= 0) return;  // cannot happen: all points in the range are outside
-
-        if constexpr (Tracer::enabled) {
-            Step s = snapshot(std::to_string(last - first + 1) + " points outside of " + str(a) + " -> " + str(b) +
-                              ". The farthest one, " + str(pts_[cIndex]) + ", is on the hull.");
-            s.tested = {{a, b}};
-            s.current = {pts_[cIndex]};
-            record(std::move(s));
-        }
-
-        // Move C to the end of the range, it is not part of the subproblems.
-        std::swap(pts_[last], pts_[cIndex]);
-        const Point c = pts_[last];
-        --last;
-
-        // [first, left.middle)          outside of A -> C
-        // [left.middle, right.middle)   outside of C -> B
-        // [right.middle, last]          inside the triangle A-C-B (or on its border): dropped
-        const Partition left = partition(pts_, first, last, a, c);
-        const Partition right = partition(pts_, left.middle, left.end, c, b);
-
-        if constexpr (Tracer::enabled) {
-            insertKnown(a, c);
-            discard(right.middle, last);
-            Step s = snapshot(std::to_string(last - right.middle + 1) + " points inside the triangle are dropped. " +
-                              "Remaining: " + std::to_string(left.middle - first) + " outside of " + str(a) +
-                              " -> " + str(c) + ", " + std::to_string(right.middle - left.middle) +
-                              " outside of " + str(c) + " -> " + str(b) + ".");
-            s.tested = {{a, c}, {c, b}, {a, b}};
-            s.current = {c};
-            record(std::move(s));
-        }
-
-        findHull(first, left.middle - 1, a, c);
-        hull_.push_back(c);
-        findHull(left.middle, right.middle - 1, c, b);
-    }
-
-    // ---- visualization only (never called with NoTrace) --------------------
-
-    void record(Step s) { trace_.record(std::move(s)); }
-
-    void discard(Index first, Index last) {
-        for (Index i = first; i <= last; ++i) discarded_.push_back(pts_[i]);
-    }
-
-    // known_ holds the hull points found so far in counter-clockwise order.
-    // A new hull point c always lies between the two ends of the edge a -> b.
-    void insertKnown(const Point& a, const Point& c) {
-        for (std::size_t i = 0; i < known_.size(); ++i) {
-            if (known_[i] == a) {
-                known_.insert(known_.begin() + static_cast<Index>(i) + 1, c);
-                return;
-            }
+    for (int i = first; i <= last; ++i) {
+        if (const float cp = crossProductEdge(a, dx, dy, points[static_cast<std::size_t>(i)]); cp > maxCP) {
+            cIndex = i;
+            maxCP = cp;
         }
     }
 
-    // Current state: hull found so far, dropped points, and all points that are
-    // still undecided (neither on the known hull nor dropped).
-    Step snapshot(std::string text) const {
-        Step s;
-        s.description = std::move(text);
-        s.chains.push_back(known_);
-        s.closed = true;
-        s.discarded = discarded_;
-
-        std::vector<Point> decided = discarded_;
-        decided.insert(decided.end(), known_.begin(), known_.end());
-        std::sort(decided.begin(), decided.end());
-        for (const Point& p : pts_)
-            if (!std::binary_search(decided.begin(), decided.end(), p)) s.candidates.push_back(p);
-        return s;
+    if (maxCP <= 0.0f) {
+        return;
     }
 
-    Step finalStep(std::string text) const {
-        Step s;
-        s.description = std::move(text);
-        s.chains.push_back(hull_);
-        s.closed = true;
-        s.discarded = discarded_;
-        return s;
+    // swap c to last index
+    std::swap(points[static_cast<std::size_t>(last)], points[static_cast<std::size_t>(cIndex)]);
+    cIndex = last;
+    last--;
+    Coordinate2d c = points[static_cast<std::size_t>(cIndex)];
+
+    if constexpr (T::enabled) {
+        trace.addHullPoint(a, c);
+        trace.record(std::to_string(last - first + 2) + " points left of " + str(a) + " -> " + str(b) +
+                         ". The farthest one, " + str(c) + ", is on the hull.",
+                     {{toPoint(a), toPoint(b)}, {toPoint(a), toPoint(c)}, {toPoint(c), toPoint(b)}}, {toPoint(c)});
     }
 
-    std::vector<Point>& pts_;
-    Tracer& trace_;
-    std::vector<Point> hull_;
-    std::vector<Point> known_;      // visualization only
-    std::vector<Point> discarded_;  // visualization only
-};
+    // partition again
+    partitionResult result = partition(points, first, last, a, c);
 
-template <class Tracer>
-std::vector<Point> quickhull(std::vector<Point> pts, Tracer& trace) {
-    return Quickhull<Tracer>(pts, trace).run();
+    if constexpr (T::enabled) {
+        trace.record(std::to_string(result.middle - first) + " points left of " + str(a) + " -> " + str(c) +
+                         ": solve this side first.",
+                     {{toPoint(a), toPoint(c)}}, {toPoint(c)});
+    }
+
+    findHullPoints(points, first, result.middle - 1, a, c, hullPoints, trace);
+
+    hullPoints.push_back(c);
+
+    first = result.middle;
+
+    result = partition(points, first, result.end, c, b);
+
+    if constexpr (T::enabled) {
+        trace.discard(result.middle, last);  // inside the triangle A-C-B or on its border
+        trace.record(std::to_string(result.middle - first) + " points left of " + str(c) + " -> " + str(b) +
+                         ", the rest is inside the triangle and dropped.",
+                     {{toPoint(c), toPoint(b)}}, {toPoint(c)});
+    }
+
+    findHullPoints(points, first, result.middle - 1, c, b, hullPoints, trace);
+}
+
+template<typename A, typename T>
+std::vector<Coordinate2d> calculateQuickhullPoints(
+    A& points,
+    T& trace
+) {
+    if constexpr (T::enabled) trace.points = &points;
+
+    if (points.size() < 2) {
+        if constexpr (T::enabled) trace.recordFinal({}, "Fewer than 2 points: no hull.");
+        return {};
+    }
+
+    int smallestXIndex = 0;
+    int biggestXIndex = static_cast<int>(points.size()) - 1;
+
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const auto idx = static_cast<int>(i);
+        const auto& p = points[i];
+        const auto& smallest = points[static_cast<std::size_t>(smallestXIndex)];
+        const auto& biggest = points[static_cast<std::size_t>(biggestXIndex)];
+
+        if (p.x < smallest.x || (p.x == smallest.x && p.y < smallest.y)) {
+            smallestXIndex = idx;
+        }
+        if (p.x > biggest.x || (p.x == biggest.x && p.y > biggest.y)) {
+            biggestXIndex = idx;
+        }
+    }
+
+    const Coordinate2d& minP = points[static_cast<std::size_t>(smallestXIndex)];
+    const Coordinate2d& maxP = points[static_cast<std::size_t>(biggestXIndex)];
+    if (minP.x == maxP.x && minP.y == maxP.y) {
+        std::cerr << "All points are identical!" << std::endl;
+        if constexpr (T::enabled) trace.recordFinal({minP}, "All points are identical: the hull is one point.");
+        return {minP};
+    }
+
+    std::swap(points[0], points[static_cast<std::size_t>(smallestXIndex)]);
+    if (biggestXIndex == 0) {
+        biggestXIndex = smallestXIndex;
+    }
+    smallestXIndex = 0;
+    const int lastIndex = static_cast<int>(points.size()) - 1;
+    std::swap(points[static_cast<std::size_t>(lastIndex)], points[static_cast<std::size_t>(biggestXIndex)]);
+    biggestXIndex = lastIndex;
+
+    Coordinate2d a = points[static_cast<std::size_t>(smallestXIndex)];
+    Coordinate2d b = points[static_cast<std::size_t>(biggestXIndex)];
+
+    if constexpr (T::enabled) {
+        trace.known = {toPoint(a), toPoint(b)};
+        trace.record("Leftmost point A " + str(a) + " and rightmost point B " + str(b) + " are on the hull.", {},
+                     {toPoint(a), toPoint(b)});
+    }
+
+    partitionResult result = partition(points, 1, lastIndex - 1, a, b);
+
+    if constexpr (T::enabled) {
+        trace.discard(result.end + 1, lastIndex - 1);  // on the line A-B
+        trace.record("The line A-B splits the points: " + std::to_string(result.middle - 1) +
+                         " above (left of A -> B), " + std::to_string(result.end - result.middle + 1) +
+                         " below. Both sides are solved separately.",
+                     {{toPoint(a), toPoint(b)}});
+    }
+
+    std::vector<Coordinate2d> hullPoints;
+    hullPoints.reserve(std::min<std::size_t>(points.size(), 4096));
+    hullPoints.push_back(a);
+
+    findHullPoints(points, 1, result.middle - 1, a, b, hullPoints, trace);
+
+    hullPoints.push_back(b);
+    findHullPoints(points, result.middle, result.end, b, a, hullPoints, trace);
+
+    if constexpr (T::enabled)
+        trace.recordFinal(hullPoints, "Done: the convex hull has " + std::to_string(hullPoints.size()) + " points.");
+    return hullPoints;
+}
+
+// ---- adapter: Point (double) -> Coordinate2d (float) -------------------------
+
+std::vector<Coordinate2d> toCoordinates(const std::vector<Point>& pts) {
+    std::vector<Coordinate2d> result(pts.size());
+    for (std::size_t i = 0; i < pts.size(); ++i)
+        result[i] = {static_cast<float>(pts[i].x), static_cast<float>(pts[i].y)};
+    return result;
 }
 
 }  // namespace
@@ -267,16 +318,19 @@ HullAlgorithm makeQuickhull() {
         {Role::Hull, "Hull points found so far"},
         {Role::Tested, "Edge / triangle being checked"},
         {Role::Current, "Farthest point (new hull point)"},
-        {Role::Candidate, "Points still outside"},
+        {Role::Candidate, "Points not decided yet"},
         {Role::Discarded, "Dropped points (inside)"},
     };
     algo.compute = [](std::vector<Point> pts) {
+        std::vector<Coordinate2d> points = toCoordinates(pts);
         NoTrace trace;
-        return quickhull(std::move(pts), trace);
+        return toPoints(calculateQuickhullPoints(points, trace));
     };
     algo.computeSteps = [](std::vector<Point> pts) {
+        std::vector<Coordinate2d> points = toCoordinates(pts);
         StepRecorder recorder;
-        quickhull(std::move(pts), recorder);
+        QuickhullTrace<StepRecorder> trace{recorder, nullptr, {}, {}};
+        calculateQuickhullPoints(points, trace);
         return std::move(recorder.steps);
     };
     return algo;
